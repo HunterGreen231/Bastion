@@ -2,6 +2,11 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_marshmallow import Marshmallow
 from flask_cors import CORS
+from random import shuffle
+from cryptography.fernet import Fernet
+from Secrets import *
+import string
+import random
 import bcrypt
 import os
 
@@ -28,7 +33,7 @@ class User(db.Model):
 
 class UserSchema(ma.Schema):
     class Meta:
-        fields = ("user_id", "user_name", "password_bank_id")
+        fields = ("user_id", "user_name")
 
 user_schema = UserSchema()
 users_schema = UserSchema(many=True)
@@ -47,6 +52,46 @@ class PasswordBankSchema(ma.Schema):
 
 password_bank_schema = PasswordBankSchema()
 password_banks_chema = PasswordBankSchema(many=True)
+
+class Website(db.Model):
+    __tablename__ = "Website"
+    website_id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    website_name = db.Column(db.LargeBinary, nullable=False)
+    website_username = db.Column(db.LargeBinary, nullable=False)
+    website_password = db.Column(db.LargeBinary, nullable=False)
+
+    def __init__(self, user_id, website_name, website_username, website_password):
+        self.user_id = user_id
+        self.website_name = website_name
+        self.website_username = website_username
+        self.website_password = website_password
+
+
+class WebsiteSchema(ma.Schema):
+    class Meta:
+        fields = ("website_id", "user_id", "website_name", "website_username", "website_password")
+
+website_schema = WebsiteSchema()
+websites_schema = WebsiteSchema(many=True)
+
+def shuffle_word(word):
+    word = list(word)
+    shuffle(word)
+    return ''.join(word)
+
+def create_password():
+    letters = string.ascii_lowercase
+    numbers = string.digits
+    uppercase = string.ascii_uppercase
+    numbersAndLetters = ''.join(random.choice(letters) for i in range(10)) + ''.join(random.choice(numbers) for i in range(10)) + ''.join(random.choice(uppercase) for i in range(10)) 
+
+    return shuffle_word(numbersAndLetters)
+
+def encrypt(text):
+    key = ENCRYPTION_KEY
+    fernet = Fernet(key)
+    return fernet.encrypt(text.encode())
 
 @app.route("/users", methods=["GET"])
 def get_users():
@@ -91,15 +136,15 @@ def login():
             user_id = x.user_id
 
     if user_id == 0:
-        return {"Message": "null"}
+        return '', 500
 
     user = User.query.get(user_id)
     password_bank = PasswordBank.query.get(user.password_bank_id)
 
     if bcrypt.checkpw(user_password.encode('utf-8'), password_bank.password_hash):
-        return {"Message": "Access Granted"}
+        return '', 200
     else:
-        return {"Message": "Wrong Password"}
+        return '', 401
 
 @app.route("/user/<id>", methods=["PUT"])
 def update_user(id):
@@ -122,6 +167,38 @@ def delete_user(id):
     db.session.delete(user)
     db.session.commit()
     return jsonify("User deleted")
+
+@app.route("/add-website", methods=["POST"])
+def add_website():
+    website_name = request.json["website_name"]
+    website_username = request.json["website_username"]
+    website_password = create_password()
+
+    user = User.query.get(1)
+    encrypted_website_name = encrypt(website_name)
+    encrypted_website_username = encrypt(website_username)
+    encrypted_website_password = encrypt(website_password)
+
+    website = Website(user.user_id, encrypted_website_name, encrypted_website_username, encrypted_website_password)
+    db.session.add(website)
+    db.session.commit()
+
+    created_website = Website.query.get(website.website_id)
+    return website_schema.jsonify(created_website)
+
+@app.route("/get-websites", methods=["GET"])
+def get_websites():
+    websites = Website.query.all()
+    return websites_schema.jsonify(websites)
+
+@app.route("/delete-website/<id>", methods=["DELETE"])
+def delete_website(id):
+    website = Website.query.get(id)
+
+    db.session.delete(website)
+    db.session.commit()
+
+    return jsonify('Website deleted')
 
 if __name__ == "__main__":
         app.debug = True
